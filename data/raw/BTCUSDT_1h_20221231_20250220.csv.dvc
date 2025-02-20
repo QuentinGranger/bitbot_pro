@@ -1,0 +1,5 @@
+outs:
+- md5: dd3045e5445d3981dd661c56cf79a939
+  size: 1231129
+  hash: md5
+  path: BTCUSDT_1h_20221231_20250220.csv
