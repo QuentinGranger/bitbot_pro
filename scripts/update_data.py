@@ -1,9 +1,13 @@
 import os
 import sys
+import warnings
 from datetime import datetime, timedelta
 import pandas as pd
 from binance.client import Client
 from dotenv import load_dotenv
+
+# Ignorer les avertissements SSL
+warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -11,7 +15,7 @@ load_dotenv()
 # Configuration de l'API Binance
 api_key = os.getenv('BINANCE_API_KEY')
 api_secret = os.getenv('BINANCE_API_SECRET')
-client = Client(api_key, api_secret)
+client = Client(api_key, api_secret, {"verify": False, "timeout": 20})
 
 def get_latest_data_timestamp(filepath):
     """Récupère le dernier timestamp des données existantes"""
