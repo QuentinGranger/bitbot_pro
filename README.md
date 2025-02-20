@@ -27,6 +27,29 @@ pip install -r requirements.txt
 - `.env` : Configuration des variables d'environnement (non versionné)
 - `.gitignore` : Liste des fichiers ignorés par Git
 
+## Structure des Données
+
+Les données sont gérées avec DVC (Data Version Control) :
+
+- `data/raw/` : Données brutes téléchargées
+- `data/processed/` : Données nettoyées et préparées
+- `data/models/` : Modèles entraînés et leurs métriques
+
+### Gestion des Données avec DVC
+
+Pour travailler avec les données :
+
+```bash
+# Télécharger les données
+dvc pull
+
+# Ajouter de nouvelles données
+dvc add data/raw/nouveau_dataset.csv
+
+# Pousser les modifications vers le stockage distant
+dvc push
+```
+
 ## Technologies Utilisées
 
 - Python 3.11
