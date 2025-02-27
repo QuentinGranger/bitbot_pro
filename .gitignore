@@ -33,7 +33,10 @@ ENV/
 *.swo
 
 # Logs et bases de données
+logs/
 *.log
+*.log.*
+*.zip
 *.sqlite
 *.db
 
@@ -45,3 +48,22 @@ config.local.yml
 # Dossiers système
 .DS_Store
 Thumbs.db
+
+# DVC
+/data/**
+!data/**/*.dvc
+!data/**/README.md
+.dvc/tmp
+.dvc/cache
+.dvc/plots
+.dvc/plots-v1.0
+.dvcignore
+
+# Données volumineuses
+*.csv
+*.parquet
+*.pkl
+*.h5
+*.hdf5
+*.joblib
+*.model
