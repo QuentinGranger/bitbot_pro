@@ -15,15 +15,15 @@ async def download_bitcoin_history():
     # Configuration
     symbol = "BTCUSDT"
     intervals = ["1h", "4h", "1d"]  # Intervalles à télécharger
-    start_year = 2015  # Binance a commencé en 2015
+    start_year = 2017  # Binance a commencé en 2017
     end_year = datetime.now().year
     
     # Répertoire de sortie
     output_dir = Path("data/binance_history")
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Client Binance
-    client = BinanceClient()
+    # Client Binance sans vérification SSL
+    client = BinanceClient(verify_ssl=False)
     
     try:
         # Télécharger pour chaque intervalle

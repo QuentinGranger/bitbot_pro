@@ -1,0 +1,11 @@
+Résultats de la vérification des fuseaux horaires:
+Source                         | Statut     | Message
+------------------------------ | ---------- | --------------------------------------------------
+Binance (test)                 | OK         | Binance (test): OK - Fuseau horaire UTC
+CoinGecko (test)               | OK         | CoinGecko (test): OK - Fuseau horaire UTC
+CoinMarketCap (test)           | OK         | CoinMarketCap (test): OK - Fuseau horaire UTC
+Google Trends (test)           | OK         | Google Trends (test): OK - Fuseau horaire UTC
+OnChain (test)                 | OK         | OnChain (test): OK - Fuseau horaire UTC
+DataMerger                     | OK         | DataMerger: OK - Fuseau horaire UTC
+
+✅ Tous les flux de données utilisent le fuseau horaire UTC.

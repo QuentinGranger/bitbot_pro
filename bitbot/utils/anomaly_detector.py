@@ -10,9 +10,8 @@ import time
 import logging
 from dataclasses import dataclass
 from enum import Enum
-
 from bitbot.utils.logger import logger
-
+from bitbot.utils.data_cleaner import DataCleaner
 
 class AnomalyType(Enum):
     """Types d'anomalies détectables."""
@@ -124,7 +123,7 @@ class AnomalyDetector:
         
         # Mettre à jour les baselines uniquement après avoir assez de données
         if len(self.data_history[key]) >= self.config["min_samples_for_baseline"]:
-            self._update_baseline(key)
+            self._calculate_baselines(key, self.data_history[key])
             
             # Exécuter les détecteurs appropriés selon le type de flux
             if stream_type == "kline":
@@ -153,50 +152,76 @@ class AnomalyDetector:
         
         return detected_anomalies
     
-    def _update_baseline(self, key: str) -> None:
+    def _calculate_baselines(self, key: str, data_points: List[Dict]) -> None:
         """
-        Met à jour les statistiques de référence pour un symbole/timeframe.
+        Calcule les valeurs de référence pour un symbole donné.
         
         Args:
             key: Clé symbole@stream_type
+            data_points: Points de données historiques
         """
-        data = self.data_history[key]
+        # Utiliser le nettoyeur de données pour filtrer les valeurs aberrantes
+        # dans le calcul des statistiques de référence
+        cleaner = DataCleaner()
         
-        # Extraire les volumes et prix des klines
-        volumes = []
+        # Extraire les prix et volumes pour le calcul des baselines
         prices = []
+        volumes = []
         timestamps = []
         
-        for item in data:
-            if 'k' in item:  # Kline data
-                volumes.append(float(item['k']['v']))
-                prices.append(float(item['k']['c']))
-                timestamps.append(item['k']['t'] / 1000)  # Convertir en secondes
-            elif 'p' in item:  # Trade data
-                prices.append(float(item['p']))
-                if 'q' in item:
-                    volumes.append(float(item['q']))
-                timestamps.append(item['T'] / 1000)  # Convertir en secondes
+        for data in data_points:
+            if 'k' in data:  # Kline data
+                prices.append(float(data['k']['c']))
+                volumes.append(float(data['k']['v']))
+                timestamps.append(data['k']['t'] // 1000)
+            elif 'p' in data:  # Trade data
+                prices.append(float(data['p']))
+                timestamps.append(data['T'] // 1000)
         
-        # Calculer les statistiques de volume si disponibles
-        if volumes:
-            self.baselines[key]["volume_mean"] = np.mean(volumes)
-            self.baselines[key]["volume_std"] = np.std(volumes)
-        
-        # Calculer les statistiques de prix
+        # Convertir en séries pandas pour le nettoyage
         if prices:
-            self.baselines[key]["price_mean"] = np.mean(prices)
-            self.baselines[key]["price_std"] = np.std(prices)
+            price_series = pd.Series(prices)
+            # Nettoyer la série de prix pour éviter que les outliers influencent les baselines
+            cleaned_price, outliers_detected, _ = cleaner._clean_column(
+                price_series, 
+                std_threshold=3.0,
+                window_size=20
+            )
+            
+            if outliers_detected > 0:
+                logger.info(f"Détection de {outliers_detected} outliers dans les prix pour le calcul des baselines")
+            
+            # Calculer les statistiques sur les données nettoyées
+            self.baselines[key]["price_mean"] = cleaned_price.mean()
+            self.baselines[key]["price_std"] = cleaned_price.std()
+        else:
+            self.baselines[key]["price_mean"] = None
+            self.baselines[key]["price_std"] = None
+        
+        if volumes:
+            volume_series = pd.Series(volumes)
+            # Nettoyer la série de volumes
+            cleaned_volume, outliers_detected, _ = cleaner._clean_column(
+                volume_series, 
+                std_threshold=3.0,
+                window_size=20
+            )
+            
+            if outliers_detected > 0:
+                logger.info(f"Détection de {outliers_detected} outliers dans les volumes pour le calcul des baselines")
+            
+            # Calculer les statistiques sur les données nettoyées
+            self.baselines[key]["volume_mean"] = cleaned_volume.mean()
+            self.baselines[key]["volume_std"] = cleaned_volume.std()
+        else:
+            self.baselines[key]["volume_mean"] = None
+            self.baselines[key]["volume_std"] = None
         
         # Déterminer l'intervalle attendu entre les données
         if len(timestamps) >= 2:
             diffs = np.diff(sorted(timestamps))
             # Utiliser la médiane pour être robuste aux outliers
             self.baselines[key]["expected_interval"] = np.median(diffs)
-        
-        # Enregistrer le dernier timestamp
-        if timestamps:
-            self.baselines[key]["last_timestamp"] = max(timestamps)
     
     def _detect_volume_spikes(self, key: str, data: Dict) -> List[Anomaly]:
         """

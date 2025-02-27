@@ -22,7 +22,10 @@ bcrypt==4.0.1
 numba>=0.58.1  # Pour l'accélération des calculs numpy
 pandas-ta>=0.3.14b  # Indicateurs techniques additionnels
 scipy>=1.11.4  # Pour les calculs scientifiques avancés
-
+matplotlib>=3.7.1
+pytz>=2023.3
+pytrends>=4.9.0  # API non officielle pour Google Trends
+requests>=2.28.0
 # Machine Learning et IA
 scikit-learn>=1.4.0  # Modèles ML classiques
 river>=0.21.0  # Apprentissage incrémental

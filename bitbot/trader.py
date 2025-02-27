@@ -18,9 +18,12 @@ from bitbot.data.binance_client import BinanceClient
 from bitbot.data.google_trends_client import GoogleTrendsClient
 from bitbot.data.cryptopanic_client import CryptoPanicClient
 from bitbot.strategies.strategy_factory import StrategyFactory
-from bitbot.models.market_data import MarketData, Signal, NewsCollection, Kline
+from bitbot.models.market_data import MarketData, Kline, Signal
 from bitbot.models.portfolio import Portfolio
 from bitbot.config import Config
+from bitbot.utils.logger import logger
+from bitbot.utils.notifications import notification_manager, NotificationType, NotificationPriority
+from bitbot.utils.data_cleaner import clean_market_data, CleaningMethod
 
 # Configuration du logger
 logger = logging.getLogger(__name__)
@@ -103,8 +106,42 @@ class Trader:
         market_data = MarketData(symbol=symbol, timeframe=timeframe)
         market_data.update_from_klines(klines)
         
+        # Nettoyer les données pour détecter et corriger les valeurs aberrantes
+        try:
+            # Déterminer le cas d'utilisation en fonction de la stratégie active
+            use_case = "general"
+            if hasattr(self, 'strategy') and self.strategy:
+                strategy_name = self.strategy.__class__.__name__.lower()
+                if "trend" in strategy_name:
+                    use_case = "trend_following"
+                elif "reversion" in strategy_name or "mean" in strategy_name:
+                    use_case = "mean_reversion"
+                elif "breakout" in strategy_name:
+                    use_case = "breakout"
+                elif "volatility" in strategy_name:
+                    use_case = "volatility"
+            
+            # Appliquer le nettoyage avec auto-sélection du filtre optimal
+            market_data = clean_market_data(
+                market_data,
+                use_case=use_case
+            )
+            
+            # Stocker les informations sur le nettoyage dans les métadonnées
+            market_data.metadata['cleaned'] = True
+            market_data.metadata['cleaning_use_case'] = use_case
+        except Exception as e:
+            logger.warning(f"Erreur lors du nettoyage des données: {e}")
+        
         # Ajouter les données Google Trends - utilisation synchrone
         # (Note: idéalement, cette méthode devrait être async et appeler await sur get_interest_over_time)
+        # trends_data = self.google_trends_client.get_interest_over_time(
+        #     keyword=currency,
+        #     timeframe='today 7-d'
+        # )
+        # 
+        # if trends_data is not None:
+        #     market_data.add_indicator("google_trends", trends_data)
         currency = symbol[:3]  # Extraction de la devise à partir du symbole
         try:
             # Puisque nous ne pouvons pas utiliser await dans une fonction synchrone, 
