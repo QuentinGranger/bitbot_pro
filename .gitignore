@@ -41,8 +41,8 @@ logs/
 *.db
 
 # Fichiers de configuration secrets
-.env
-.env.*
+#.env
+#.env.*
 config.local.yml
 
 # Dossiers système
