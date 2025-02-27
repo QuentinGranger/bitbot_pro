@@ -1,0 +1,2 @@
+# Mise à jour des données de marché tous les jours à 00:05 UTC
+5 0 * * * cd /Users/user/Downloads/BitBotPro && /usr/local/bin/python3 scripts/update_market_data.py >> logs/market_data_update.log 2>&1
