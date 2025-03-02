@@ -554,3 +554,53 @@ class OnChainClient:
         except Exception as e:
             logger.error(f"Erreur lors du calcul du ratio MVRV: {e}")
             return pd.DataFrame()
+    
+    def get_nupl_data(self, asset: str = "BTC", days: int = 365) -> pd.DataFrame:
+        """
+        Calcule une approximation du NUPL (Net Unrealized Profit/Loss).
+        
+        Le NUPL est un indicateur qui montre la différence entre la valeur de marché
+        et la valeur réalisée en pourcentage de la valeur de marché.
+        Il peut être utilisé comme alternative au MVRV.
+        
+        NUPL = (Market Cap - Realized Cap) / Market Cap
+        
+        Args:
+            asset: Actif pour lequel calculer le NUPL (par défaut "BTC").
+            days: Nombre de jours de données à récupérer.
+            
+        Returns:
+            DataFrame contenant le NUPL approximatif.
+        """
+        try:
+            logger.info(f"Calcul du NUPL approximatif pour {asset}")
+            
+            # Récupérer les données MVRV car NUPL utilise les mêmes données sous-jacentes
+            mvrv_data = self.get_approximate_mvrv_ratio(asset=asset, days=days)
+            
+            if mvrv_data.empty:
+                logger.warning(f"Aucune donnée MVRV disponible pour calculer le NUPL pour {asset}")
+                return pd.DataFrame()
+            
+            # Créer un DataFrame pour le NUPL
+            df_nupl = pd.DataFrame()
+            df_nupl['timestamp'] = mvrv_data['timestamp']
+            df_nupl['price'] = mvrv_data['price']
+            df_nupl['market_cap'] = mvrv_data['market_cap']
+            df_nupl['realized_cap'] = mvrv_data['realized_cap']
+            
+            # Calculer le NUPL
+            df_nupl['nupl'] = (df_nupl['market_cap'] - df_nupl['realized_cap']) / df_nupl['market_cap']
+            
+            # Classifier le NUPL en catégories
+            df_nupl['nupl_category'] = pd.cut(
+                df_nupl['nupl'],
+                bins=[-1, -0.25, 0, 0.25, 0.5, 0.75, 1],
+                labels=['Capitulation', 'Peur', 'Espoir', 'Optimisme', 'Euphorie', 'Avidité']
+            )
+            
+            return df_nupl
+        
+        except Exception as e:
+            logger.error(f"Erreur lors du calcul du NUPL: {e}")
+            return pd.DataFrame()

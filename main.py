@@ -37,6 +37,13 @@ def parse_arguments():
     parser.add_argument('--timeframe', type=str, default='1h', help='Intervalle de temps (par défaut: 1h)')
     parser.add_argument('--days', type=int, default=30, help='Nombre de jours pour le backtest (par défaut: 30)')
     
+    # Arguments pour le mode Safe
+    safe_group = parser.add_argument_group('Mode Safe')
+    safe_group.add_argument('--safe-mode', dest='safe_mode_action', choices=['status', 'activate', 'deactivate'], 
+                           help='Gérer le mode Safe (protection automatique)')
+    safe_group.add_argument('--reason', type=str, help='Raison de l\'activation du mode Safe (uniquement avec --safe-mode activate)')
+    safe_group.add_argument('--close-positions', action='store_true', help='Fermer toutes les positions lors de l\'activation du mode Safe')
+    
     return parser.parse_args()
 
 def main():
@@ -49,6 +56,45 @@ def main():
         
         # Initialisation du trader
         trader = Trader(config)
+        
+        # Gestion du mode Safe
+        if args.safe_mode_action:
+            if args.safe_mode_action == 'status':
+                if trader.safe_mode_enabled:
+                    activation_time = trader.safe_mode_activated_at.strftime("%Y-%m-%d %H:%M:%S") if trader.safe_mode_activated_at else "N/A"
+                    hours_elapsed = 0
+                    if trader.safe_mode_activated_at:
+                        hours_elapsed = (datetime.now() - trader.safe_mode_activated_at).total_seconds() / 3600
+                        
+                    logger.info(f"Mode Safe: ACTIVÉ")
+                    logger.info(f"Raison: {trader.safe_mode_reason}")
+                    logger.info(f"Activé depuis: {activation_time} ({hours_elapsed:.1f} heures)")
+                else:
+                    logger.info(f"Mode Safe: DÉSACTIVÉ")
+                return
+                
+            elif args.safe_mode_action == 'activate':
+                reason = args.reason or "Activation manuelle via CLI"
+                close_positions = args.close_positions
+                
+                success = trader.activate_safe_mode(reason=reason, close_positions=close_positions)
+                
+                if success:
+                    logger.info(f"Mode Safe activé avec succès. Raison: {reason}")
+                    if close_positions:
+                        logger.info("Positions fermées.")
+                else:
+                    logger.error("Échec de l'activation du mode Safe.")
+                return
+                
+            elif args.safe_mode_action == 'deactivate':
+                success = trader.deactivate_safe_mode()
+                
+                if success:
+                    logger.info("Mode Safe désactivé avec succès.")
+                else:
+                    logger.error("Échec de la désactivation du mode Safe.")
+                return
         
         if args.backtest:
             logger.info(f"Lancement du backtest sur {args.symbol} (timeframe: {args.timeframe}, jours: {args.days})")

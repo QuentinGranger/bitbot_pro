@@ -37,7 +37,10 @@ class MVRVIndicator:
                 undervalued_threshold: float = 1.0,
                 strong_undervalued_threshold: float = 0.75,
                 overvalued_threshold: float = 2.5,
-                strong_overvalued_threshold: float = 3.5):
+                strong_overvalued_threshold: float = 3.5,
+                use_fallback: bool = True,
+                volatility_threshold: float = 0.02,
+                consider_orderbook: bool = False):
         """
         Initialise l'indicateur MVRV.
         
@@ -47,6 +50,9 @@ class MVRVIndicator:
             strong_undervalued_threshold: Seuil pour considérer le marché comme fortement sous-évalué.
             overvalued_threshold: Seuil pour considérer le marché comme surévalué.
             strong_overvalued_threshold: Seuil pour considérer le marché comme fortement surévalué.
+            use_fallback: Utiliser les indicateurs alternatifs comme NUPL en cas d'échec du MVRV.
+            volatility_threshold: Seuil de volatilité pour ajuster la pondération des indicateurs on-chain.
+            consider_orderbook: Analyser les carnets d'ordres pour détecter les murs d'achat/vente.
         """
         self.client = OnChainClient()
         self.ema_period = ema_period
@@ -54,13 +60,20 @@ class MVRVIndicator:
         self.strong_undervalued_threshold = strong_undervalued_threshold
         self.overvalued_threshold = overvalued_threshold
         self.strong_overvalued_threshold = strong_overvalued_threshold
+        self.use_fallback = use_fallback
+        self.volatility_threshold = volatility_threshold
+        self.consider_orderbook = consider_orderbook
+        self.volatility_weight = 1.0  # Poids initial pour les indicateurs on-chain
         
         logger.info(f"Indicateur MVRV initialisé avec les paramètres: "
                    f"ema_period={ema_period}, "
                    f"undervalued_threshold={undervalued_threshold}, "
                    f"strong_undervalued_threshold={strong_undervalued_threshold}, "
                    f"overvalued_threshold={overvalued_threshold}, "
-                   f"strong_overvalued_threshold={strong_overvalued_threshold}")
+                   f"strong_overvalued_threshold={strong_overvalued_threshold}, "
+                   f"use_fallback={use_fallback}, "
+                   f"volatility_threshold={volatility_threshold}, "
+                   f"consider_orderbook={consider_orderbook}")
     
     def set_parameters(self, **kwargs) -> None:
         """
@@ -96,12 +109,65 @@ class MVRVIndicator:
         # Récupérer les données MVRV approximatives
         df_mvrv = self.client.get_approximate_mvrv_ratio(asset=asset, days=days)
         
-        if df_mvrv.empty:
+        if df_mvrv.empty and self.use_fallback:
+            logger.warning(f"Aucune donnée MVRV récupérée pour {asset}, utilisation du fallback NUPL")
+            # Utiliser NUPL comme fallback
+            return self.get_nupl_data(asset=asset, days=days)
+        elif df_mvrv.empty:
             logger.warning(f"Aucune donnée MVRV récupérée pour {asset}")
             return pd.DataFrame()
         
         # Calculer l'EMA
         df_mvrv['mvrv_ema'] = df_mvrv['mvrv_ratio'].ewm(span=self.ema_period, adjust=False).mean()
+        
+        return df_mvrv
+    
+    def get_nupl_data(self, 
+                     asset: str = "BTC", 
+                     days: int = 365) -> pd.DataFrame:
+        """
+        Récupère les données NUPL (Net Unrealized Profit/Loss) comme alternative au MVRV.
+        
+        Args:
+            asset: Actif pour lequel récupérer les données NUPL (par défaut "BTC").
+            days: Nombre de jours de données à récupérer.
+            
+        Returns:
+            DataFrame contenant les données NUPL converties en format MVRV.
+        """
+        logger.info(f"Récupération des données NUPL comme fallback pour {asset}")
+        
+        # Récupérer les données NUPL
+        df_nupl = self.client.get_nupl_data(asset=asset, days=days)
+        
+        if df_nupl.empty:
+            logger.warning(f"Aucune donnée NUPL récupérée pour {asset}")
+            return pd.DataFrame()
+        
+        # Conversion des données NUPL en format compatible avec MVRV
+        # MVRV = Market Cap / Realized Cap
+        # NUPL = (Market Cap - Realized Cap) / Market Cap
+        # Relation: MVRV = 1 / (1 - NUPL)
+        
+        # Créer un DataFrame au format MVRV
+        df_mvrv = pd.DataFrame()
+        df_mvrv['timestamp'] = df_nupl['timestamp']
+        df_mvrv['price'] = df_nupl['price']
+        df_mvrv['market_cap'] = df_nupl['market_cap']
+        df_mvrv['realized_cap'] = df_nupl['realized_cap']
+        
+        # Convertir NUPL en MVRV
+        # Éviter la division par zéro
+        df_mvrv['mvrv_ratio'] = 1 / (1 - df_nupl['nupl'].clip(-0.99, 0.99))
+        
+        # Calculer l'EMA
+        df_mvrv['mvrv_ema'] = df_mvrv['mvrv_ratio'].ewm(span=self.ema_period, adjust=False).mean()
+        
+        # Ajouter les valeurs NUPL pour référence
+        df_mvrv['nupl'] = df_nupl['nupl']
+        df_mvrv['nupl_category'] = df_nupl['nupl_category']
+        
+        logger.info(f"Données NUPL converties en format MVRV pour {asset}")
         
         return df_mvrv
     
@@ -221,7 +287,8 @@ class MVRVIndicator:
     def analyze(self, 
                asset: str = "BTC", 
                days: int = 365,
-               until: Optional[Union[str, datetime]] = None) -> Dict[str, Any]:
+               until: Optional[Union[str, datetime]] = None,
+               check_orderbooks: bool = False) -> Dict[str, Any]:
         """
         Analyse complète du ratio MVRV.
         
@@ -229,6 +296,7 @@ class MVRVIndicator:
             asset: Actif à analyser (par défaut "BTC").
             days: Nombre de jours de données à récupérer.
             until: Date de fin (format ISO ou objet datetime).
+            check_orderbooks: Si True, analyse les carnets d'ordres pour détecter les murs d'achat/vente.
             
         Returns:
             Dictionnaire contenant les résultats de l'analyse.
@@ -249,6 +317,14 @@ class MVRVIndicator:
         
         # Calculer le Z-score
         mvrv_data_with_z = self.calculate_mvrv_z_score(mvrv_data)
+        
+        # Calculer la volatilité et ajuster la pondération
+        self._adjust_volatility_weight(mvrv_data)
+        
+        # Analyser les carnets d'ordres si demandé
+        orderbook_analysis = {}
+        if check_orderbooks or self.consider_orderbook:
+            orderbook_analysis = self._analyze_orderbooks(asset)
         
         # Générer le signal
         signal = self.get_signal(mvrv_data)
@@ -272,7 +348,7 @@ class MVRVIndicator:
         distance_to_undervalued = (last_mvrv - self.undervalued_threshold) / self.undervalued_threshold * 100
         distance_to_overvalued = (last_mvrv - self.overvalued_threshold) / self.overvalued_threshold * 100
         
-        return {
+        result = {
             "signal": signal,
             "is_undervalued": is_undervalued,
             "is_overvalued": is_overvalued,
@@ -285,9 +361,91 @@ class MVRVIndicator:
             "mvrv_median": mvrv_median,
             "distance_to_undervalued": distance_to_undervalued,
             "distance_to_overvalued": distance_to_overvalued,
+            "volatility_weight": self.volatility_weight,
             "data": mvrv_data_with_z
         }
+        
+        # Ajouter les données NUPL si disponibles
+        if 'nupl' in mvrv_data.columns:
+            result["nupl"] = mvrv_data['nupl'].iloc[-1]
+            result["nupl_category"] = mvrv_data['nupl_category'].iloc[-1]
+            result["using_nupl_fallback"] = True
+        
+        # Ajouter les résultats de l'analyse des carnets d'ordres
+        if orderbook_analysis:
+            result.update(orderbook_analysis)
+        
+        return result
     
+    def _adjust_volatility_weight(self, data: pd.DataFrame, window: int = 14) -> None:
+        """
+        Ajuste la pondération des indicateurs on-chain en fonction de la volatilité récente.
+        
+        En période de faible volatilité, les indicateurs on-chain sont moins réactifs
+        et donc moins pertinents à court terme.
+        
+        Args:
+            data: DataFrame contenant au moins les prix historiques.
+            window: Fenêtre pour le calcul de la volatilité.
+        """
+        if data.empty or len(data) < window:
+            logger.warning("Données insuffisantes pour calculer la volatilité")
+            self.volatility_weight = 1.0
+            return
+        
+        # Calculer la volatilité (écart-type des rendements journaliers)
+        returns = data['price'].pct_change().dropna()
+        volatility = returns.rolling(window=window).std().iloc[-1]
+        
+        if np.isnan(volatility):
+            logger.warning("Impossible de calculer la volatilité")
+            self.volatility_weight = 1.0
+            return
+        
+        # Ajuster le poids en fonction de la volatilité
+        # Si la volatilité est inférieure au seuil, réduire la pondération
+        if volatility < self.volatility_threshold:
+            # Formule: plus la volatilité est faible, plus le poids est faible
+            self.volatility_weight = min(1.0, volatility / self.volatility_threshold)
+        else:
+            self.volatility_weight = 1.0
+        
+        logger.info(f"Volatilité: {volatility:.4f}, Poids des indicateurs on-chain: {self.volatility_weight:.2f}")
+    
+    def _analyze_orderbooks(self, asset: str) -> Dict[str, Any]:
+        """
+        Analyse les carnets d'ordres pour détecter les "walls" d'achat/vente.
+        
+        Les "walls" d'ordres (murs d'achat/vente) sont de larges ordres placés
+        à des niveaux de prix spécifiques qui peuvent indiquer des zones de support/résistance.
+        
+        Args:
+            asset: Actif à analyser.
+            
+        Returns:
+            Dictionnaire contenant les résultats de l'analyse.
+        """
+        logger.info(f"Analyse des carnets d'ordres pour {asset}")
+        
+        # Note: Cette fonction est un placeholder pour une implémentation plus complète
+        # qui nécessiterait une connexion à une API fournissant des données de carnet d'ordres
+        
+        # Dans une implémentation réelle, on pourrait:
+        # 1. Récupérer les données de carnet d'ordres depuis une API d'échange
+        # 2. Identifier les zones de concentration d'ordres (murs)
+        # 3. Calculer la distance entre le prix actuel et ces murs
+        # 4. Evaluer si ces murs confirment ou contredisent le signal MVRV
+        
+        return {
+            "orderbook_analyzed": True,
+            "buy_walls_detected": False,
+            "sell_walls_detected": False,
+            "closest_buy_wall_price": None,
+            "closest_sell_wall_price": None,
+            "orderbook_confirms_signal": None,
+            "orderbook_note": "Fonctionnalité simulée. Implémentation réelle nécessiterait une API d'échange."
+        }
+
     def plot_mvrv(self, 
                  mvrv_data: pd.DataFrame, 
                  title: str = "Ratio MVRV (Market Value to Realized Value)",
@@ -371,3 +529,6 @@ class MVRVIndicator:
         
         plt.tight_layout()
         return fig
+
+# Créer un alias MVRVRatio pour la classe MVRVIndicator pour maintenir la compatibilité
+MVRVRatio = MVRVIndicator

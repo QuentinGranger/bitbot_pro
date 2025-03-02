@@ -326,3 +326,20 @@ class ATRIndicator:
         results['recommended_position_size'] = position_size
         
         return results
+
+# Importer la stratégie ATR Stop Loss à la fin du module
+# Cela permet d'accéder à toutes les fonctionnalités via le module ATR sans duplication de code
+from bitbot.strategie.indicators.atr_stop_loss_strategy import (
+    ATRStopLossStrategy,
+    StopLossType,
+    TrailingSLMode
+)
+
+# Exposer les classes directement dans le module ATR pour une utilisation plus facile
+__all__ = [
+    'VolatilityLevel',
+    'ATRIndicator',
+    'ATRStopLossStrategy',
+    'StopLossType',
+    'TrailingSLMode'
+]

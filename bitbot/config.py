@@ -41,6 +41,14 @@ class Config:
     order_quantity: float = 0.01
     leverage: float = 1.0
     
+    # Configuration du mode Safe (protection automatique)
+    safe_mode_enabled: bool = True  # Mode Safe activé par défaut
+    safe_mode_max_drawdown_threshold: float = 15.0  # Seuil de drawdown critique en pourcentage
+    safe_mode_max_volatility_threshold: float = 5.0  # Seuil de volatilité critique en pourcentage
+    safe_mode_max_data_age_minutes: int = 10  # Âge maximal des données en minutes avant d'activer le mode Safe
+    safe_mode_auto_deactivate_after_hours: int = 0  # 0 = désactivation manuelle uniquement, sinon nombre d'heures
+    safe_mode_notify_admin: bool = True  # Envoyer une notification à l'administrateur
+    
     def __post_init__(self):
         """Initialise les valeurs par défaut après la création de l'objet."""
         # S'assurer que data_dir est un Path

@@ -239,9 +239,9 @@ class BinanceWebSocket:
             'messages_processed': 0,
             'errors': 0,
             'reconnections': 0,
+            'ping_timeouts': 0,
             'latency': [],
             'connection_drops': 0,
-            'ping_timeouts': 0,
             'last_disconnect_reason': None,
             'connection_uptime': 0,
             'reconnection_attempts': [],
@@ -256,14 +256,25 @@ class BinanceWebSocket:
         self.reconnecting = False
         self.current_reconnect_delay = self.config.reconnect_delay
 
+        # Verrou pour éviter les accès concurrents au WebSocket
+        self.ws_lock = asyncio.Lock()
+        
+        # File d'attente pour les messages
+        self.message_queue = asyncio.Queue()
+        self.consumer_task = None
+        
+        # Contexte SSL personnalisé
+        self.ssl_context = None
+    
     async def connect(self):
         """Établit la connexion WebSocket avec gestion des erreurs."""
         try:
             self.ws = await websockets.connect(
                 self.config.base_endpoint + "/ws",
-                ping_interval=None,  # On gère nous-mêmes les pings
-                ping_timeout=None,
-                close_timeout=5  # Timeout pour la fermeture propre
+                ping_interval=self.config.ping_interval,  # Laisser la bibliothèque gérer les pings
+                ping_timeout=self.config.ping_timeout,
+                close_timeout=5,  # Timeout pour la fermeture propre
+                ssl=self.ssl_context
             )
             self.connected = True
             self.reconnecting = False
@@ -275,7 +286,6 @@ class BinanceWebSocket:
             
             # Démarrer les tâches de maintenance
             self.tasks = [
-                asyncio.create_task(self._ping_loop()),
                 asyncio.create_task(self._process_messages()),
                 asyncio.create_task(self._monitor_connection()),
                 asyncio.create_task(self._health_check())
@@ -291,43 +301,24 @@ class BinanceWebSocket:
             self.connected = False
             self.stats['last_disconnect_reason'] = str(e)
             await self._handle_connection_error()
-
-    async def _ping_loop(self):
-        """Envoie des pings réguliers pour maintenir la connexion."""
-        while self.running:
-            try:
-                if self.connected:
-                    await self.ws.ping()
-                    self.last_ping_time = time.time()
-                    
-                    # Vérifier si on a reçu un pong pour le dernier ping
-                    if self.last_pong_time is None or time.time() - self.last_pong_time > self.config.ping_timeout:
-                        logger.warning(f"Pas de pong reçu depuis {time.time() - self.last_pong_time:.2f}s")
-                        self.stats['ping_timeouts'] += 1
-                        await self._handle_connection_error("Ping timeout")
-                    
-                    await asyncio.sleep(self.config.ping_interval)
-            except Exception as e:
-                logger.error(f"Erreur ping: {str(e)}")
-                await self._handle_connection_error("Erreur ping")
-
+    
     async def _process_messages(self):
         """Traite les messages entrants avec gestion de la latence."""
+        # Démarrage de la tâche consommatrice de la file d'attente
+        self.consumer_task = asyncio.create_task(self._message_consumer())
+        
         while self.running:
             try:
                 if not self.connected:
                     await asyncio.sleep(0.1)
                     continue
                 
-                message = await asyncio.wait_for(
-                    self.ws.recv(),
-                    timeout=self.config.ping_interval + self.config.ping_timeout
-                )
-                
-                # Si on reçoit un pong (message vide ou spécifique de pong)
-                if message == "" or message == "pong":
-                    self.last_pong_time = time.time()
-                    continue
+                # Utiliser le verrou pour recevoir les messages du WebSocket
+                async with self.ws_lock:
+                    message = await asyncio.wait_for(
+                        self.ws.recv(),
+                        timeout=self.config.ping_interval + self.config.ping_timeout
+                    )
                 
                 receive_time = time.time()
                 
@@ -344,8 +335,8 @@ class BinanceWebSocket:
                 
                 self.stats['messages_received'] += 1
                 
-                # Traiter le message
-                await self._handle_message(message)
+                # Mettre le message dans la file d'attente au lieu de le traiter directement
+                await self.message_queue.put(message)
                 
             except asyncio.TimeoutError:
                 logger.warning("Timeout en attente de message")
@@ -356,6 +347,23 @@ class BinanceWebSocket:
             except Exception as e:
                 logger.error(f"Erreur traitement message: {str(e)}")
                 self.stats['errors'] += 1
+
+    async def _message_consumer(self):
+        """Consomme les messages de la file d'attente et les traite."""
+        while self.running:
+            try:
+                # Récupérer un message de la file d'attente
+                message = await self.message_queue.get()
+                
+                # Traiter le message
+                await self._handle_message(message)
+                
+                # Marquer la tâche comme terminée
+                self.message_queue.task_done()
+            except Exception as e:
+                logger.error(f"Erreur dans le consommateur de messages: {str(e)}")
+                self.stats['errors'] += 1
+                await asyncio.sleep(0.1)  # Petite pause en cas d'erreur
 
     async def _handle_message(self, message: str):
         """
@@ -622,13 +630,7 @@ class BinanceWebSocket:
                     await self.close()
                     await self.connect()
                 
-                # Vérifier le dernier ping/pong
-                ping_pong_timeout = self.config.ping_interval + self.config.ping_timeout
-                if (self.last_ping_time and 
-                    time.time() - self.last_ping_time > ping_pong_timeout):
-                    logger.warning("Ping timeout")
-                    self.stats['ping_timeouts'] += 1
-                    await self._handle_connection_error("Ping timeout")
+                # Nous ne vérifions plus les ping/pong car la bibliothèque websockets s'en charge
                 
                 await asyncio.sleep(1)
                 
@@ -698,26 +700,42 @@ class BinanceWebSocket:
             stream_type: Type de stream
             callback: Fonction de callback optionnelle
         """
-        if len(self.subscriptions) >= self.config.max_subscriptions:
-            raise ValueError("Nombre maximum de subscriptions atteint")
-        
-        stream = f"{symbol.lower()}@{stream_type.value}"
-        
-        if callback:
-            self.callbacks[stream].append(callback)
-        
-        if stream in self.subscriptions:
-            return
-        
-        subscribe_message = {
-            "method": "SUBSCRIBE",
-            "params": [stream],
-            "id": len(self.subscriptions) + 1
-        }
-        
-        await self._send_message(subscribe_message)
-        self.subscriptions.add(stream)
-
+        try:
+            # Vérifier si on a atteint la limite de subscriptions
+            if len(self.subscriptions) >= self.config.max_subscriptions:
+                logger.error("Limite de subscriptions atteinte")
+                return False
+            
+            # Créer le nom du stream (ex: 'btcusdt@kline_1m')
+            stream_name = f"{symbol.lower()}@{stream_type.value}"
+            
+            # Si déjà abonné, juste ajouter le callback
+            if stream_name in self.subscriptions and callback:
+                self.callbacks[stream_name].append(callback)
+                return True
+            
+            # Construction de la requête de subscription
+            subscribe_request = {
+                "method": "SUBSCRIBE",
+                "params": [stream_name],
+                "id": int(time.time() * 1000)
+            }
+            
+            # Envoyer la requête avec le verrou
+            async with self.ws_lock:
+                await self._send_message(subscribe_request)
+            
+            # Mise à jour des listes de subscription et callbacks
+            self.subscriptions.add(stream_name)
+            if callback:
+                self.callbacks[stream_name].append(callback)
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la subscription: {str(e)}")
+            return False
+            
     async def unsubscribe(self, symbol: str, stream_type: StreamType):
         """
         Se désabonne d'un stream.
@@ -748,14 +766,23 @@ class BinanceWebSocket:
         Args:
             message: Message à envoyer
         """
-        if not self.connected:
-            raise ConnectionError("WebSocket non connecté")
-        
         try:
-            await self.ws.send(json.dumps(message))
+            if not self.connected:
+                logger.warning("Tentative d'envoi sur un WebSocket non connecté")
+                return False
+            
+            # Sérialiser le message
+            msg_str = json.dumps(message)
+            
+            # Envoi avec le verrou pour éviter les accès concurrents
+            async with self.ws_lock:
+                await self.ws.send(msg_str)
+                
+            return True
         except Exception as e:
             logger.error(f"Erreur envoi message: {str(e)}")
-            await self._handle_connection_error()
+            await self._handle_connection_error("Erreur envoi")
+            return False
 
     async def _resubscribe(self):
         """Réabonne à tous les streams après une reconnexion."""
@@ -774,17 +801,25 @@ class BinanceWebSocket:
         """Ferme proprement la connexion."""
         self.running = False
         
-        # Annuler toutes les tâches
+        # Arrêter toutes les tâches
         for task in self.tasks:
-            task.cancel()
+            if not task.done():
+                task.cancel()
         
-        # Fermer le WebSocket
-        if self.ws:
-            await self.ws.close()
+        # Arrêter la tâche de consommation des messages
+        if self.consumer_task and not self.consumer_task.done():
+            self.consumer_task.cancel()
         
-        self.connected = False
+        # Fermer la connexion WebSocket
+        if self.ws and self.connected:
+            try:
+                await self.ws.close()
+                self.connected = False
+            except Exception as e:
+                logger.error(f"Erreur fermeture WebSocket: {str(e)}")
+        
         logger.info("Connexion WebSocket fermée")
-
+    
     def get_buffer_content(self, symbol: str, stream_type: StreamType, count: int = 10) -> List[Any]:
         """
         Récupère les dernières données du buffer pour un stream donné.
@@ -930,7 +965,161 @@ class BinanceWebSocket:
         # Lancer la tâche de récupération
         asyncio.create_task(self._recover_from_gap(symbol, start_time, end_time))
         return True
+
+    def register_anomaly_callback(self, 
+                                anomaly_type: AnomalyType, 
+                                callback: Callable[[Anomaly], Any]) -> None:
+        """
+        Enregistre un callback pour un type d'anomalie spécifique.
+        
+        Args:
+            anomaly_type: Type d'anomalie à monitorer
+            callback: Fonction à appeler lorsqu'une anomalie est détectée
+        """
+        if not self.config.anomaly_detection_enabled:
+            logger.warning("Détection d'anomalies désactivée, callback non enregistré")
+            return
+            
+        self.anomaly_callbacks[anomaly_type].append(callback)
+        logger.info(f"Callback enregistré pour les anomalies de type {anomaly_type.value}")
     
+    def get_anomaly_stats(self) -> Dict:
+        """
+        Récupère les statistiques sur les anomalies détectées.
+        
+        Returns:
+            Dictionnaire de statistiques
+        """
+        if not self.anomaly_detector:
+            return {
+                "enabled": False,
+                "detected": 0,
+                "recovered": 0
+            }
+            
+        # Récupérer le résumé des anomalies pour la dernière heure
+        anomalies_summary = self.anomaly_detector.get_anomaly_summary(window_seconds=3600)
+        
+        # Ajouter nos propres statistiques
+        anomalies_summary.update({
+            "enabled": True,
+            "detected_total": self.stats['anomalies_detected'],
+            "recovered_total": self.stats['anomalies_recovered'],
+        })
+        
+        return anomalies_summary
+    
+    def detect_data_gap(self, 
+                      symbol: str, 
+                      stream_type: str, 
+                      start_time: float, 
+                      end_time: float, 
+                      expected_interval: Optional[float] = None) -> bool:
+        """
+        Détecte si un gap existe dans les données entre deux timestamps.
+        
+        Cette méthode analyse les données de la fenêtre glissante pour déterminer
+        s'il existe un gap significatif entre les timestamps fournis.
+        
+        Args:
+            symbol: Symbole à vérifier
+            stream_type: Type de stream (kline, trade, etc.)
+            start_time: Timestamp de début
+            end_time: Timestamp de fin
+            expected_interval: Intervalle attendu entre deux points de données,
+                              si None, estimé à partir des données
+        
+        Returns:
+            True si un gap est détecté, False sinon
+        """
+        stream_key = f"{symbol.lower()}@{stream_type}"
+        
+        # Récupérer toutes les données dans l'intervalle
+        data = self.sliding_window_buffer.get_between(stream_key, start_time, end_time)
+        
+        if not data:
+            # Aucune donnée dans l'intervalle = gap
+            return True
+        
+        # Extraire les timestamps
+        timestamps = []
+        for timestamp, item in data:
+            timestamps.append(timestamp)
+        
+        if not timestamps:
+            return True
+            
+        # Trier les timestamps
+        timestamps.sort()
+        
+        # Si expected_interval n'est pas fourni, l'estimer
+        if expected_interval is None:
+            if len(timestamps) > 1:
+                diffs = [t2 - t1 for t1, t2 in zip(timestamps[:-1], timestamps[1:])]
+                expected_interval = sum(diffs) / len(diffs)
+            else:
+                # Impossible d'estimer, on retourne False par défaut
+                return False
+        
+        # Calculer les différences successives
+        diffs = [t2 - t1 for t1, t2 in zip(timestamps[:-1], timestamps[1:])]
+        
+        # Détecter des gaps en utilisant le seuil configuré
+        threshold = expected_interval * self.config.data_gap_threshold
+        
+        for i, diff in enumerate(diffs):
+            if diff > threshold:
+                # Gap détecté
+                logger.warning(f"Gap détecté dans {stream_key} entre "
+                             f"{datetime.fromtimestamp(timestamps[i])} et "
+                             f"{datetime.fromtimestamp(timestamps[i+1])}, "
+                             f"durée: {diff:.2f}s (seuil: {threshold:.2f}s)")
+                return True
+        
+        # Vérifier si le premier timestamp est trop éloigné du start_time
+        if timestamps[0] - start_time > threshold:
+            logger.warning(f"Gap détecté au début de l'intervalle {stream_key} entre "
+                         f"{datetime.fromtimestamp(start_time)} et "
+                         f"{datetime.fromtimestamp(timestamps[0])}, "
+                         f"durée: {timestamps[0] - start_time:.2f}s (seuil: {threshold:.2f}s)")
+            return True
+            
+        # Vérifier si le dernier timestamp est trop éloigné du end_time
+        if end_time - timestamps[-1] > threshold:
+            logger.warning(f"Gap détecté à la fin de l'intervalle {stream_key} entre "
+                         f"{datetime.fromtimestamp(timestamps[-1])} et "
+                         f"{datetime.fromtimestamp(end_time)}, "
+                         f"durée: {end_time - timestamps[-1]:.2f}s (seuil: {threshold:.2f}s)")
+            return True
+        
+        # Pas de gap détecté
+        return False
+    
+    def fill_historical_gap(self, 
+                          symbol: str, 
+                          stream_type: str, 
+                          start_time: float, 
+                          end_time: float) -> bool:
+        """
+        Lance une requête de récupération de données historiques pour combler un gap.
+        
+        Args:
+            symbol: Symbole à compléter
+            stream_type: Type de stream (kline, trade, etc.)
+            start_time: Timestamp de début
+            end_time: Timestamp de fin
+            
+        Returns:
+            True si la récupération a été lancée, False sinon
+        """
+        if not self.rest_client:
+            logger.warning("Client REST non configuré, impossible de récupérer les données historiques")
+            return False
+            
+        # Lancer la tâche de récupération
+        asyncio.create_task(self._recover_from_gap(symbol, start_time, end_time))
+        return True
+
     def register_anomaly_callback(self, 
                                 anomaly_type: AnomalyType, 
                                 callback: Callable[[Anomaly], Any]) -> None:
@@ -1201,3 +1390,70 @@ class BinanceWebSocket:
             
         except Exception as e:
             logger.error(f"Erreur lors du traitement de l'anomalie: {str(e)}")
+
+class BinanceWebSocketManager:
+    """
+    Gestionnaire de WebSocket Binance optimisé.
+    Gère la connexion, la reconnexion et le traitement efficace des flux de données.
+    """
+    
+    def __init__(self, config: Optional[WebSocketConfig] = None):
+        """
+        Initialise le gestionnaire WebSocket.
+        
+        Args:
+            config: Configuration du WebSocket
+        """
+        self.config = config or WebSocketConfig()
+        self.ws = None
+        self.connected = False
+        self.subscriptions: Set[str] = set()
+        self.callbacks: Dict[str, List[Callable]] = defaultdict(list)
+        self.connection_time = None
+        self.last_ping_time = None
+        self.last_pong_time = None
+        self.rate_limiter = RateLimiter(
+            rate=self.config.message_rate_limit,
+            per=1
+        )
+        
+        # Buffers pour les données
+        self.kline_buffer: Dict[str, List[Kline]] = defaultdict(list)
+        self.trade_buffer: Dict[str, List[Trade]] = defaultdict(list)
+        self.orderbook_buffer: Dict[str, OrderBook] = {}
+        self.sliding_window_buffer = SlidingWindowBuffer(
+            max_size=self.config.sliding_window_size,
+            retention_seconds=self.config.data_retention_seconds
+        )
+        
+        # Détecteur d'anomalies
+        if self.config.anomaly_detection_enabled:
+            self.anomaly_detector = AnomalyDetector({
+                "volume_spike_z_score": self.config.volume_spike_z_score,
+                "price_spike_z_score": self.config.price_spike_z_score,
+                "data_gap_threshold": self.config.data_gap_threshold,
+            })
+            # Callbacks pour les anomalies
+            self.anomaly_callbacks: Dict[AnomalyType, List[Callable]] = defaultdict(list)
+        else:
+            self.anomaly_detector = None
+        
+        # Tâches asyncio
+        self.tasks = []
+        self.running = False
+        
+        # Statistiques
+        self.stats = {
+            'messages_received': 0,
+            'messages_processed': 0,
+            'errors': 0,
+            'reconnections': 0,
+            'ping_timeouts': 0,
+            'latency': deque(maxlen=1000)
+        }
+        
+        # Verrou pour éviter les accès concurrents au WebSocket
+        self.ws_lock = asyncio.Lock()
+        
+        # File d'attente pour les messages
+        self.message_queue = asyncio.Queue()

@@ -42,7 +42,9 @@ class ExchangeNetflow:
                 outflow_threshold: float = -1000,  # BTC
                 strong_outflow_threshold: float = -5000,  # BTC
                 inflow_threshold: float = 1000,  # BTC
-                strong_inflow_threshold: float = 5000):  # BTC
+                strong_inflow_threshold: float = 5000,  # BTC
+                volatility_threshold: float = 0.02,  # 2% comme seuil de volatilité
+                consider_orderbook: bool = False):  # Nouveau paramètre pour l'analyse des carnets d'ordres
         """
         Initialise l'indicateur de flux d'échange.
         
@@ -52,6 +54,8 @@ class ExchangeNetflow:
             strong_outflow_threshold: Seuil pour considérer un flux sortant fort.
             inflow_threshold: Seuil pour considérer un flux entrant significatif.
             strong_inflow_threshold: Seuil pour considérer un flux entrant fort.
+            volatility_threshold: Seuil de volatilité pour ajuster la pondération des signaux.
+            consider_orderbook: Si True, analyse les carnets d'ordres pour renforcer les signaux.
         """
         self.client = OnChainClient()
         self.ema_period = ema_period
@@ -59,13 +63,18 @@ class ExchangeNetflow:
         self.strong_outflow_threshold = strong_outflow_threshold
         self.inflow_threshold = inflow_threshold
         self.strong_inflow_threshold = strong_inflow_threshold
+        self.volatility_threshold = volatility_threshold
+        self.volatility_weight = 1.0  # Poids initial (pleine confiance)
+        self.consider_orderbook = consider_orderbook
         
         logger.info(f"Indicateur Exchange Netflow initialisé avec les paramètres: "
                    f"ema_period={ema_period}, "
                    f"outflow_threshold={outflow_threshold}, "
                    f"strong_outflow_threshold={strong_outflow_threshold}, "
                    f"inflow_threshold={inflow_threshold}, "
-                   f"strong_inflow_threshold={strong_inflow_threshold}")
+                   f"strong_inflow_threshold={strong_inflow_threshold}, "
+                   f"volatility_threshold={volatility_threshold}, "
+                   f"consider_orderbook={consider_orderbook}")
     
     def get_netflow_data(self, asset: str = "BTC", days: int = 30) -> pd.DataFrame:
         """
@@ -161,6 +170,46 @@ class ExchangeNetflow:
             logger.error(f"Erreur lors de la récupération des données approximatives de flux d'échange: {e}")
             return pd.DataFrame()
     
+    def analyze(self, asset: str = "BTC", days: int = 30, check_orderbooks: bool = False) -> Dict[str, Any]:
+        """
+        Récupère et analyse les données de flux d'échange pour un actif.
+        
+        Args:
+            asset: Symbole de l'actif (BTC, ETH, etc.).
+            days: Nombre de jours de données à récupérer.
+            check_orderbooks: Si True, analyse les carnets d'ordres pour renforcer les signaux.
+            
+        Returns:
+            Dictionnaire contenant les résultats de l'analyse.
+        """
+        # Récupérer les données de flux d'échange
+        netflow_data = self.get_netflow_data(asset=asset, days=days)
+        
+        if netflow_data.empty:
+            logger.warning(f"Aucune donnée de flux d'échange pour {asset}")
+            return {}
+        
+        # Analyser les données de flux d'échange
+        result = self.analyze_netflow(netflow_data)
+        
+        # Ajouter les données au résultat
+        result['data'] = netflow_data
+        
+        # Analyser les carnets d'ordres si demandé
+        if check_orderbooks or self.consider_orderbook:
+            orderbook_analysis = self._analyze_orderbooks(asset)
+            result.update(orderbook_analysis)
+            
+            # Renforcer ou atténuer le signal en fonction de l'analyse du carnet d'ordres
+            if self._should_reinforce_signal(result['signal'], orderbook_analysis):
+                result['signal_reinforced'] = True
+                result['signal_note'] = "Signal renforcé par l'analyse du carnet d'ordres"
+            elif self._should_attenuate_signal(result['signal'], orderbook_analysis):
+                result['signal_attenuated'] = True
+                result['signal_note'] = "Signal atténué par l'analyse du carnet d'ordres"
+        
+        return result
+    
     def analyze_netflow(self, netflow_data: pd.DataFrame) -> Dict[str, Any]:
         """
         Analyse les données de flux d'échange et génère des signaux.
@@ -174,6 +223,9 @@ class ExchangeNetflow:
         if netflow_data.empty:
             logger.warning("Aucune donnée de flux d'échange pour l'analyse")
             return {}
+        
+        # Ajuster la pondération en fonction de la volatilité
+        self._adjust_volatility_weight(netflow_data)
         
         # Dernière valeur de netflow
         current_netflow = netflow_data['netflow'].iloc[-1]
@@ -214,7 +266,8 @@ class ExchangeNetflow:
             "is_outflow": current_netflow < self.outflow_threshold,
             "is_strong_outflow": current_netflow < self.strong_outflow_threshold,
             "is_inflow": current_netflow > self.inflow_threshold,
-            "is_strong_inflow": current_netflow > self.strong_inflow_threshold
+            "is_strong_inflow": current_netflow > self.strong_inflow_threshold,
+            "volatility_weight": self.volatility_weight
         }
     
     def _determine_signal(self, netflow: float) -> NetflowSignal:
@@ -227,16 +280,175 @@ class ExchangeNetflow:
         Returns:
             Signal de flux d'échange.
         """
-        if netflow < self.strong_outflow_threshold:
+        # Appliquer la pondération de volatilité aux seuils
+        adjusted_outflow = self.outflow_threshold * self.volatility_weight
+        adjusted_strong_outflow = self.strong_outflow_threshold * self.volatility_weight
+        adjusted_inflow = self.inflow_threshold * self.volatility_weight
+        adjusted_strong_inflow = self.strong_inflow_threshold * self.volatility_weight
+        
+        if netflow < adjusted_strong_outflow:
             return NetflowSignal.STRONG_OUTFLOW
-        elif netflow < self.outflow_threshold:
+        elif netflow < adjusted_outflow:
             return NetflowSignal.OUTFLOW
-        elif netflow > self.strong_inflow_threshold:
+        elif netflow > adjusted_strong_inflow:
             return NetflowSignal.STRONG_INFLOW
-        elif netflow > self.inflow_threshold:
+        elif netflow > adjusted_inflow:
             return NetflowSignal.INFLOW
         else:
             return NetflowSignal.NEUTRAL
+    
+    def _adjust_volatility_weight(self, data: pd.DataFrame) -> None:
+        """
+        Ajuste la pondération des signaux en fonction de la volatilité du marché.
+        
+        En période de faible volatilité, les indicateurs on-chain sont moins réactifs à court terme,
+        donc leur impact sur la décision de trading est réduit.
+        
+        Args:
+            data: DataFrame contenant l'historique des prix.
+        """
+        if 'price' not in data.columns or len(data) < 14:
+            # Pas assez de données pour calculer la volatilité
+            self.volatility_weight = 1.0
+            return
+        
+        # Calculer la volatilité sur les 14 derniers jours (ou moins si pas assez de données)
+        window = min(14, len(data) - 1)
+        recent_data = data.iloc[-window-1:].copy()
+        
+        # Calculer les rendements journaliers
+        recent_data['returns'] = recent_data['price'].pct_change()
+        
+        # Écart-type des rendements (mesure de volatilité)
+        volatility = recent_data['returns'].std()
+        
+        # Si la volatilité est inférieure au seuil, réduire le poids
+        if volatility < self.volatility_threshold:
+            # Formule: volatility_weight varie de 0.1 (volatilité minimale) à 1.0 (seuil atteint)
+            self.volatility_weight = max(0.1, min(1.0, volatility / self.volatility_threshold))
+        else:
+            # Si la volatilité est supérieure au seuil, poids normal
+            self.volatility_weight = 1.0
+        
+        logger.info(f"Volatilité: {volatility:.4f}, Poids des indicateurs on-chain: {self.volatility_weight:.2f}")
+    
+    def _analyze_orderbooks(self, asset: str) -> Dict[str, Any]:
+        """
+        Analyse les carnets d'ordres pour identifier des murs d'achat/vente.
+        
+        Args:
+            asset: Symbole de l'actif.
+            
+        Returns:
+            Dictionnaire contenant les résultats de l'analyse des carnets d'ordres.
+        """
+        logger.info(f"Analyse des carnets d'ordres pour {asset}")
+        
+        # Dans une implémentation réelle, on utiliserait une API d'exchange comme Binance ou Coinbase
+        # pour récupérer les données de carnet d'ordres en temps réel
+        
+        # Cette implémentation simule l'analyse des carnets d'ordres
+        # En réalité, il faudrait intégrer des API d'exchanges et implémenter une logique d'analyse
+        # plus sophistiquée pour identifier des murs d'achat/vente
+        
+        # Simuler des résultats d'analyse de carnet d'ordres pour démonstration
+        # Dans une implémentation réelle, cette méthode analyserait les données réelles
+        # des carnets d'ordres des principales exchanges où l'actif est tradé
+        
+        # Résultats simulés
+        buy_walls_detected = False
+        sell_walls_detected = False
+        
+        # Détection aléatoire pour simulation
+        import random
+        random.seed(datetime.now().timestamp())
+        if random.random() < 0.3:  # 30% de chance de détecter un mur d'achat
+            buy_walls_detected = True
+        if random.random() < 0.3:  # 30% de chance de détecter un mur de vente
+            sell_walls_detected = True
+        
+        # Générer une note d'analyse basée sur les résultats
+        orderbook_note = ""
+        if buy_walls_detected and sell_walls_detected:
+            orderbook_note = "Murs d'achat et de vente détectés, indiquant une zone de consolidation potentielle."
+        elif buy_walls_detected:
+            orderbook_note = "Murs d'achat significatifs détectés, suggérant un support solide aux niveaux actuels."
+        elif sell_walls_detected:
+            orderbook_note = "Murs de vente significatifs détectés, suggérant une résistance aux niveaux actuels."
+        else:
+            orderbook_note = "Aucun mur d'achat ou de vente significatif détecté dans les carnets d'ordres."
+        
+        # Construction du résultat
+        orderbook_result = {
+            "orderbook_analyzed": True,
+            "buy_walls_detected": buy_walls_detected,
+            "sell_walls_detected": sell_walls_detected,
+            "orderbook_note": orderbook_note
+        }
+        
+        # Dans une implémentation réelle, on ajouterait plus de détails:
+        # - niveaux de prix des murs
+        # - volume cumulé aux niveaux de support/résistance
+        # - distribution du volume dans le carnet d'ordres
+        # - métrique d'imbalance entre acheteurs et vendeurs
+        
+        return orderbook_result
+    
+    def _should_reinforce_signal(self, signal: str, orderbook_analysis: Dict[str, Any]) -> bool:
+        """
+        Détermine si le signal doit être renforcé basé sur l'analyse du carnet d'ordres.
+        
+        Args:
+            signal: Signal de flux d'échange.
+            orderbook_analysis: Résultats de l'analyse du carnet d'ordres.
+            
+        Returns:
+            True si le signal doit être renforcé, False sinon.
+        """
+        if not orderbook_analysis.get("orderbook_analyzed", False):
+            return False
+        
+        # Si le signal est d'achat (sortie des exchanges) et qu'il y a des murs d'achat
+        # C'est un renforcement du signal haussier
+        if (signal == NetflowSignal.STRONG_OUTFLOW.value or signal == NetflowSignal.OUTFLOW.value) and \
+           orderbook_analysis.get("buy_walls_detected", False):
+            return True
+        
+        # Si le signal est de vente (entrée dans les exchanges) et qu'il y a des murs de vente
+        # C'est un renforcement du signal baissier
+        if (signal == NetflowSignal.STRONG_INFLOW.value or signal == NetflowSignal.INFLOW.value) and \
+           orderbook_analysis.get("sell_walls_detected", False):
+            return True
+        
+        return False
+    
+    def _should_attenuate_signal(self, signal: str, orderbook_analysis: Dict[str, Any]) -> bool:
+        """
+        Détermine si le signal doit être atténué basé sur l'analyse du carnet d'ordres.
+        
+        Args:
+            signal: Signal de flux d'échange.
+            orderbook_analysis: Résultats de l'analyse du carnet d'ordres.
+            
+        Returns:
+            True si le signal doit être atténué, False sinon.
+        """
+        if not orderbook_analysis.get("orderbook_analyzed", False):
+            return False
+        
+        # Si le signal est d'achat (sortie des exchanges) mais qu'il y a des murs de vente
+        # Cela contredit le signal haussier
+        if (signal == NetflowSignal.STRONG_OUTFLOW.value or signal == NetflowSignal.OUTFLOW.value) and \
+           orderbook_analysis.get("sell_walls_detected", False):
+            return True
+        
+        # Si le signal est de vente (entrée dans les exchanges) mais qu'il y a des murs d'achat
+        # Cela contredit le signal baissier
+        if (signal == NetflowSignal.STRONG_INFLOW.value or signal == NetflowSignal.INFLOW.value) and \
+           orderbook_analysis.get("buy_walls_detected", False):
+            return True
+        
+        return False
     
     def plot_netflow(self, netflow_data: pd.DataFrame, asset: str = "BTC", output_path: Optional[str] = None) -> None:
         """
