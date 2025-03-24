@@ -1,0 +1,71 @@
+2025-03-24 23:16:12.248 | INFO     | __main__:90 | ================ DÉMARRAGE DE LA SIMULATION ================
+2025-03-24 23:16:12.249 | INFO     | __main__:92 | Début du cycle de trading #1
+2025-03-24 23:16:12.249 | INFO     | __main__:20 | Démarrage de BitBot Pro
+2025-03-24 23:16:12.249 | INFO     | bitbot_pro.utils.logger:131 | Connexion réussie à l'exchange Binance
+2025-03-24 23:16:12.752 | INFO     | bitbot_pro.utils.logger:131 | Connexion réussie à l'exchange Bybit
+2025-03-24 23:16:13.255 | INFO     | bitbot_pro.utils.logger:131 | Connexion réussie à l'exchange OKX
+2025-03-24 23:16:13.761 | DEBUG    | __main__:31 | Analyse technique en cours sur BTC/USDT
+2025-03-24 23:16:14.764 | DEBUG    | __main__:33 | Calcul des indicateurs: RSI=42, MACD=-0.0002, BB=2.5%
+2025-03-24 23:16:14.765 | INFO     | __main__:36 | Signal d'achat détecté sur BTC/USDT
+2025-03-24 23:16:14.765 | TRADE    | bitbot_pro.utils.logger:149 | [Binance] BUY market 0.01 BTC/USDT
+2025-03-24 23:16:14.766 | API      | __main__:48 | Vérification des prix sur différents exchanges
+2025-03-24 23:16:14.766 | DEBUG    | __main__:55 | Prix BTC/USDT sur Binance: 68452.12
+2025-03-24 23:16:14.766 | DEBUG    | __main__:55 | Prix BTC/USDT sur Bybit: 68447.89
+2025-03-24 23:16:14.766 | DEBUG    | __main__:55 | Prix BTC/USDT sur OKX: 68459.75
+2025-03-24 23:16:14.766 | INFO     | __main__:59 | Opportunité d'arbitrage: Différence de prix BTC/USDT = 11.86 USD
+2025-03-24 23:16:14.766 | TRADE    | bitbot_pro.utils.logger:149 | [Bybit] BUY market 0.01 BTC/USDT
+2025-03-24 23:16:14.766 | TRADE    | bitbot_pro.utils.logger:149 | [OKX] SELL market 0.01 BTC/USDT
+2025-03-24 23:16:14.766 | TRADE    | __main__:64 | Profit d'arbitrage estimé: 0.12 USD
+2025-03-24 23:16:14.766 | INFO     | __main__:85 | Cycle de trading complété à 23:16:14
+2025-03-24 23:16:16.767 | INFO     | __main__:92 | Début du cycle de trading #2
+2025-03-24 23:16:16.767 | INFO     | __main__:20 | Démarrage de BitBot Pro
+2025-03-24 23:16:16.767 | INFO     | bitbot_pro.utils.logger:131 | Connexion réussie à l'exchange Binance
+2025-03-24 23:16:17.270 | INFO     | bitbot_pro.utils.logger:131 | Connexion réussie à l'exchange Bybit
+2025-03-24 23:16:17.776 | INFO     | bitbot_pro.utils.logger:131 | Connexion réussie à l'exchange OKX
+2025-03-24 23:16:18.281 | DEBUG    | __main__:31 | Analyse technique en cours sur BTC/USDT
+2025-03-24 23:16:19.285 | DEBUG    | __main__:33 | Calcul des indicateurs: RSI=42, MACD=-0.0002, BB=2.5%
+2025-03-24 23:16:19.286 | INFO     | __main__:36 | Signal d'achat détecté sur BTC/USDT
+2025-03-24 23:16:19.286 | TRADE    | bitbot_pro.utils.logger:149 | [Binance] BUY market 0.01 BTC/USDT
+2025-03-24 23:16:19.286 | API      | __main__:48 | Vérification des prix sur différents exchanges
+2025-03-24 23:16:19.286 | DEBUG    | __main__:55 | Prix BTC/USDT sur Binance: 68452.12
+2025-03-24 23:16:19.286 | DEBUG    | __main__:55 | Prix BTC/USDT sur Bybit: 68447.89
+2025-03-24 23:16:19.286 | DEBUG    | __main__:55 | Prix BTC/USDT sur OKX: 68459.75
+2025-03-24 23:16:19.286 | INFO     | __main__:59 | Opportunité d'arbitrage: Différence de prix BTC/USDT = 11.86 USD
+2025-03-24 23:16:19.286 | TRADE    | bitbot_pro.utils.logger:149 | [Bybit] BUY market 0.01 BTC/USDT
+2025-03-24 23:16:19.286 | TRADE    | bitbot_pro.utils.logger:149 | [OKX] SELL market 0.01 BTC/USDT
+2025-03-24 23:16:19.286 | TRADE    | __main__:64 | Profit d'arbitrage estimé: 0.12 USD
+2025-03-24 23:16:19.286 | ERROR    | bitbot_pro.utils.logger:161 | Erreur dans CalculEngine: Erreur de calcul critique
+2025-03-24 23:16:19.287 | ERROR    | bitbot_pro.utils.logger:163 | division by zero
+Traceback (most recent call last):
+
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+
+  File "/Users/user/Desktop/BitBotPro/bitbot_pro/utils/logger_example.py", line 93, in <module>
+    simulate_bot_activities()
+    └ <function simulate_bot_activities at 0x1050dca40>
+
+> File "/Users/user/Desktop/BitBotPro/bitbot_pro/utils/logger_example.py", line 80, in simulate_bot_activities
+    result = 1 / 0
+
+ZeroDivisionError: division by zero
+2025-03-24 23:16:19.289 | INFO     | __main__:85 | Cycle de trading complété à 23:16:19
+2025-03-24 23:16:21.294 | INFO     | __main__:92 | Début du cycle de trading #3
+2025-03-24 23:16:21.294 | INFO     | __main__:20 | Démarrage de BitBot Pro
+2025-03-24 23:16:21.294 | INFO     | bitbot_pro.utils.logger:131 | Connexion réussie à l'exchange Binance
+2025-03-24 23:16:21.799 | INFO     | bitbot_pro.utils.logger:131 | Connexion réussie à l'exchange Bybit
+2025-03-24 23:16:22.304 | INFO     | bitbot_pro.utils.logger:131 | Connexion réussie à l'exchange OKX
+2025-03-24 23:16:22.805 | DEBUG    | __main__:31 | Analyse technique en cours sur BTC/USDT
+2025-03-24 23:16:23.811 | DEBUG    | __main__:33 | Calcul des indicateurs: RSI=42, MACD=-0.0002, BB=2.5%
+2025-03-24 23:16:23.811 | INFO     | __main__:36 | Signal d'achat détecté sur BTC/USDT
+2025-03-24 23:16:23.811 | TRADE    | bitbot_pro.utils.logger:149 | [Binance] BUY market 0.01 BTC/USDT
+2025-03-24 23:16:23.812 | API      | __main__:48 | Vérification des prix sur différents exchanges
+2025-03-24 23:16:23.812 | DEBUG    | __main__:55 | Prix BTC/USDT sur Binance: 68452.12
+2025-03-24 23:16:23.812 | DEBUG    | __main__:55 | Prix BTC/USDT sur Bybit: 68447.89
+2025-03-24 23:16:23.812 | DEBUG    | __main__:55 | Prix BTC/USDT sur OKX: 68459.75
+2025-03-24 23:16:23.812 | INFO     | __main__:59 | Opportunité d'arbitrage: Différence de prix BTC/USDT = 11.86 USD
+2025-03-24 23:16:23.812 | TRADE    | bitbot_pro.utils.logger:149 | [Bybit] BUY market 0.01 BTC/USDT
+2025-03-24 23:16:23.812 | TRADE    | bitbot_pro.utils.logger:149 | [OKX] SELL market 0.01 BTC/USDT
+2025-03-24 23:16:23.812 | TRADE    | __main__:64 | Profit d'arbitrage estimé: 0.12 USD
+2025-03-24 23:16:23.812 | INFO     | __main__:85 | Cycle de trading complété à 23:16:23
+2025-03-24 23:16:25.817 | INFO     | __main__:95 | ================ FIN DE LA SIMULATION ================

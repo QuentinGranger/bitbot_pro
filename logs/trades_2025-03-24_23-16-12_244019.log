@@ -1,0 +1,12 @@
+2025-03-24 23:16:14.765 | TRADE    | bitbot_pro.utils.logger:149 | [Binance] BUY market 0.01 BTC/USDT
+2025-03-24 23:16:14.766 | TRADE    | bitbot_pro.utils.logger:149 | [Bybit] BUY market 0.01 BTC/USDT
+2025-03-24 23:16:14.766 | TRADE    | bitbot_pro.utils.logger:149 | [OKX] SELL market 0.01 BTC/USDT
+2025-03-24 23:16:14.766 | TRADE    | __main__:64 | Profit d'arbitrage estimé: 0.12 USD
+2025-03-24 23:16:19.286 | TRADE    | bitbot_pro.utils.logger:149 | [Binance] BUY market 0.01 BTC/USDT
+2025-03-24 23:16:19.286 | TRADE    | bitbot_pro.utils.logger:149 | [Bybit] BUY market 0.01 BTC/USDT
+2025-03-24 23:16:19.286 | TRADE    | bitbot_pro.utils.logger:149 | [OKX] SELL market 0.01 BTC/USDT
+2025-03-24 23:16:19.286 | TRADE    | __main__:64 | Profit d'arbitrage estimé: 0.12 USD
+2025-03-24 23:16:23.811 | TRADE    | bitbot_pro.utils.logger:149 | [Binance] BUY market 0.01 BTC/USDT
+2025-03-24 23:16:23.812 | TRADE    | bitbot_pro.utils.logger:149 | [Bybit] BUY market 0.01 BTC/USDT
+2025-03-24 23:16:23.812 | TRADE    | bitbot_pro.utils.logger:149 | [OKX] SELL market 0.01 BTC/USDT
+2025-03-24 23:16:23.812 | TRADE    | __main__:64 | Profit d'arbitrage estimé: 0.12 USD

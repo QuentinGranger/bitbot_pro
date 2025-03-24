@@ -1,0 +1,15 @@
+2025-03-24 23:16:19.286 | ERROR    | bitbot_pro.utils.logger:161 | Erreur dans CalculEngine: Erreur de calcul critique
+2025-03-24 23:16:19.287 | ERROR    | bitbot_pro.utils.logger:163 | division by zero
+Traceback (most recent call last):
+
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+
+  File "/Users/user/Desktop/BitBotPro/bitbot_pro/utils/logger_example.py", line 93, in <module>
+    simulate_bot_activities()
+    └ <function simulate_bot_activities at 0x1050dca40>
+
+> File "/Users/user/Desktop/BitBotPro/bitbot_pro/utils/logger_example.py", line 80, in simulate_bot_activities
+    result = 1 / 0
+
+ZeroDivisionError: division by zero
