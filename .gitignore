@@ -1,0 +1,38 @@
+# Environnement virtuel
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Fichiers compilés Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Logs et données temporaires
+logs/
+*.log
+data/
+*.csv
+*.xlsx
+*.db
+*.sqlite
+
+# Fichiers de cache et configuration IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Résultats et graphiques
+*.png
+results/

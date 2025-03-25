@@ -28,3 +28,6 @@ tensorflow==2.19.0  # Pour macOS, utiliser tflite-runtime==2.14.0 sur Raspberry 
 sqlalchemy==2.0.27
 pyarrow==14.0.1
 ta==0.11.0
+python-coinmarketcap==0.2
+cryptocompare==0.7.6
+python-dotenv==1.0.1  # Pour gérer les clés API de manière sécurisée
